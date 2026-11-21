@@ -15,6 +15,46 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: 探测 sherpa-onnx 模型资产
+        continue-on-error: true
+        run: |
+          for tag in asr-models tts-models; do
+            echo "======== $tag ========"
+            curl -sL --max-time 180 \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/$tag" \
+              -o "/tmp/$tag.json" || true
+            echo "json 字节: $(wc -c < /tmp/$tag.json 2>/dev/null || echo 0)"
+            awk '
+              /^ *"name": "/ { l=$0; sub(/^ *"name": "/,"",l); sub(/",?[ \t]*$/,"",l); n=l }
+              /^ *"size": [0-9]+/ {
+                s=$0; gsub(/[^0-9]/,"",s)
+                if (n ~ /(zh|aishell|baker|paraformer|zipformer|sense|kokoro|matcha)/ && n ~ /(tar\.bz2|\.onnx)$/)
+                  printf "%9.1f MB  %s\n", s/1048576, n
+                n=""
+              }
+            ' "/tmp/$tag.json" | sort -n | head -40
+          done
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: 下载 sherpa-onnx AAR 并导出 API 签名
+        continue-on-error: true
+        run: |
+          AAR=/tmp/sherpa.aar
+          curl -sL --max-time 300 -o "$AAR" \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-2.0.2.aar" || true
+          echo "AAR 字节: $(wc -c < $AAR 2>/dev/null || echo 0)"
+          mkdir -p /tmp/aa && cd /tmp/aa && unzip -o -q "$AAR" || true
+          echo "=== 顶层 ==="; ls -l
+          echo "=== jni 各 ABI 体积 ==="; du -sh jni/* 2>/dev/null
+          echo "=== 关键类方法 ==="
+          for c in OfflineRecognizer OfflineRecognizerConfig OfflineModelConfig OfflineTts OfflineTtsConfig OfflineTtsModelConfig OfflineTtsVitsModelConfig; do
+            echo "---- $c ----"
+            javap -classpath classes.jar "com.k2fsa.sherpa.onnx.$c" 2>/dev/null | head -40
+          done
+
       - name: 准备 Android SDK
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
@@ -36,14 +76,11 @@ jobs:
           KS="$HOME/.android/debug.keystore"
           if [ ! -f "$KS" ]; then
             mkdir -p "$HOME/.android"
-            keytool -genkeypair -v \
-              -keystore "$KS" \
-              -storepass android -keypass android \
-              -alias androiddebugkey \
+            keytool -genkeypair -v -keystore "$KS" \
+              -storepass android -keypass android -alias androiddebugkey \
               -keyalg RSA -keysize 2048 -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
-          echo "签名指纹："
           keytool -list -v -keystore "$KS" -storepass android 2>/dev/null | grep -E 'SHA1|SHA256' | head -4
 
       - uses: gradle/actions/setup-gradle@v4
@@ -62,4 +99,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: chat-apk
-          path: app/build/outputs/apk/release/*.apk
+          path: app/build/outputs/apk/release/app-release.apk

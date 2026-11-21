@@ -101,3 +101,67 @@ DeepSeek（纯文字）
 ```
 
 **不要把 API Key 写进代码或提交到仓库**，只在 App 的设置页里填。
+
+## 离线神经 TTS 调研结论（2026-11）
+
+### 结论：可行，但代价不小
+
+| 项 | 实际情况 |
+|---|---|
+| 依赖来源 | **不在 Maven Central**，必须从 GitHub Releases 下载 `.aar` 后本地引用 |
+| 最新版本 | `v2.0.2` |
+| AAR 体积 | `sherpa-onnx-2.0.2.aar` = **52,321,252 字节（约 52 MB）**，含多个 ABI |
+| 只打包 arm64-v8a | 预计 APK 增加 12–15 MB |
+| 模型 | 需 `.onnx` 中文模型，**几十 MB 量级**，建议运行时下载而非打包 |
+| 打包要求 | `aaptOptions { noCompress "onnx" }`，否则模型会被压缩导致加载失败 |
+
+AAR 下载地址：
+`https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-2.0.2.aar`
+
+参考实现：https://github.com/ybsoftware/AndroidTTS
+
+### 两条路线
+
+**路线 A：换系统 TTS 引擎（零代码、零体积）**
+
+系统 TTS 已验证可用。用户安装一个音质更好的离线 TTS 引擎 App
+（如讯飞语记、Google 语音服务），系统 TTS 自动使用它。
+本 App 无需任何改动。
+
+**路线 B：内置 sherpa-onnx（完全可控）**
+
+- APK 从 1.0 MB 增至约 13–15 MB
+- 首次使用下载模型几十 MB（可断点续传）
+- 音质与音色完全可控，可离线、可换模型
+
+### 权衡
+
+当前网络 10–100 KB/s 的情况下，路线 B 的首次成本是
+**15 MB APK + 几十 MB 模型**，约 10–30 分钟。
+路线 A 成本为零，但受限于手机上已装的引擎质量。
+
+## 模型管理（v0.10）
+
+设置页新增「语音模型管理」，提供两个模型的下载入口：
+
+- 语音识别模型
+- 语音合成模型
+
+实现要点（`Models.kt`）：
+
+| 能力 | 说明 |
+|---|---|
+| 断点续传 | 用 `Range: bytes=N-`，中断后再点继续 |
+| 解包 | 支持 `.tar.bz2` / `.tar.gz` / 单个 `.onnx` |
+| 依赖 | `org.apache.commons:commons-compress:1.26.2`（Android 无内置 bzip2） |
+| 进度回传 | IO 线程 → 主线程 Handler → Compose 状态 |
+| 存储位置 | `filesDir/models/{asr,tts}/` |
+
+模型地址做成**可填写字段**，这样：
+
+1. GitHub 下载慢时可以换成镜像地址
+2. 官方换了模型名不用改代码
+3. 想换音色只换地址
+
+尚未完成：把模型接到 sherpa-onnx 的识别/合成 API 上，
+需要先拿到 AAR 的真实类与方法签名（由 CI 的 `javap` 步骤导出）。

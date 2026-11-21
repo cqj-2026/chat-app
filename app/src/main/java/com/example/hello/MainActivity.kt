@@ -51,20 +51,22 @@ import java.util.concurrent.TimeUnit
 
 // ---------------- 配置 ----------------
 
-data class Cfg(val base: String, val key: String, val model: String)
+data class Cfg(val base: String, val key: String, val model: String, val persona: String = "")
 
 class Store(ctx: Context) {
     private val sp = ctx.getSharedPreferences("cfg", Context.MODE_PRIVATE)
     fun load() = Cfg(
         sp.getString("base", "") ?: "",
         sp.getString("key", "") ?: "",
-        sp.getString("model", "") ?: ""
+        sp.getString("model", "") ?: "",
+        sp.getString("persona", "") ?: ""
     )
     fun save(c: Cfg) {
         sp.edit()
             .putString("base", c.base)
             .putString("key", c.key)
             .putString("model", c.model)
+            .putString("persona", c.persona)
             .apply()
     }
     fun ready(c: Cfg) = c.base.isNotBlank() && c.key.isNotBlank() && c.model.isNotBlank()
@@ -88,9 +90,12 @@ private val http = OkHttpClient.Builder()
     .build()
 
 /** 历史里只有最后一张图会带 base64，更早的图用文字占位，省流量省 token */
-private fun buildPayloadMessages(history: List<Msg>): JSONArray {
+private fun buildPayloadMessages(persona: String, history: List<Msg>): JSONArray {
     val lastUser = history.indexOfLast { it.role == "user" }
     val arr = JSONArray()
+    if (persona.isNotBlank()) {
+        arr.put(JSONObject().put("role", "system").put("content", persona))
+    }
     history.forEachIndexed { i, m ->
         val o = JSONObject().put("role", m.role)
         if (m.imageUrl != null && i == lastUser) {
@@ -120,7 +125,7 @@ private suspend fun streamChat(
 ) {
     val payload = JSONObject()
         .put("model", cfg.model)
-        .put("messages", buildPayloadMessages(history))
+        .put("messages", buildPayloadMessages(cfg.persona, history))
         .put("stream", true)
         .toString()
 
@@ -217,6 +222,13 @@ fun CfgScreen(init: Cfg, canCancel: Boolean, onSave: (Cfg) -> Unit, onCancel: ()
     var base by remember { mutableStateOf(init.base) }
     var key by remember { mutableStateOf(init.key) }
     var model by remember { mutableStateOf(init.model) }
+    var persona by remember { mutableStateOf(init.persona) }
+    var showModels by remember { mutableStateOf(false) }
+
+    if (showModels) {
+        ModelScreen(onBack = { showModels = false })
+        return
+    }
 
     Column(
         Modifier
@@ -251,10 +263,23 @@ fun CfgScreen(init: Cfg, canCancel: Boolean, onSave: (Cfg) -> Unit, onCancel: ()
             singleLine = true, modifier = Modifier.fillMaxWidth()
         )
 
+        OutlinedTextField(
+            value = persona, onValueChange = { persona = it },
+            label = { Text("人格设定（系统提示词，可选）") },
+            placeholder = { Text("你叫小满，22 岁，说话短…") },
+            minLines = 3, maxLines = 8,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        OutlinedButton(
+            onClick = { showModels = true },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("语音模型管理") }
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Button(
                 onClick = {
-                    onSave(Cfg(base.trim().trimEnd('/'), key.trim(), model.trim()))
+                    onSave(Cfg(base.trim().trimEnd('/'), key.trim(), model.trim(), persona.trim()))
                 },
                 enabled = base.isNotBlank() && key.isNotBlank() && model.isNotBlank(),
                 modifier = Modifier.weight(1f)

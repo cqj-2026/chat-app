@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.hello"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.8"
+        versionCode = 10
+        versionName = "0.10"
     }
 
     buildFeatures {
@@ -52,4 +52,5 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.apache.commons:commons-compress:1.26.2")
 }
