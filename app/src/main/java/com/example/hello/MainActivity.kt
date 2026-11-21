@@ -75,6 +75,7 @@ data class Msg(
     val text: String,
     val imageUrl: String? = null,
     val thumb: Bitmap? = null,
+    val imgFile: String? = null,
     val isErr: Boolean = false
 )
 
@@ -288,7 +289,13 @@ fun CfgScreen(init: Cfg, canCancel: Boolean, onSave: (Cfg) -> Unit, onCancel: ()
 @Composable
 fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
     val ctx = LocalContext.current
-    val msgs = remember { mutableStateListOf(Msg("assistant", "已连接：${cfg.model}")) }
+    val hist = remember { History(ctx) }
+    val msgs = remember {
+        mutableStateListOf<Msg>().apply {
+            val saved = hist.load()
+            if (saved.isEmpty()) add(Msg("assistant", "已连接：${cfg.model}")) else addAll(saved)
+        }
+    }
     var input by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var pending by remember { mutableStateOf<Pair<Bitmap, String>?>(null) }
@@ -336,7 +343,8 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
         pending = null
         busy = true
 
-        val userMsg = Msg("user", t, imageUrl = img?.second, thumb = img?.first)
+        val imgFile = img?.let { hist.saveImage(it.second) }
+        val userMsg = Msg("user", t, imageUrl = img?.second, thumb = img?.first, imgFile = imgFile)
         val history = msgs.filter { !it.isErr }.toList() + userMsg
 
         msgs.add(userMsg)
@@ -363,6 +371,11 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
             } finally {
                 withContext(Dispatchers.Main) {
                     busy = false
+                    val savedMsg = msgs.getOrNull(idx)
+                    if (savedMsg != null && !savedMsg.isErr) {
+                        hist.append(userMsg.copy(imageUrl = null, thumb = null))
+                        hist.append(savedMsg.copy(imageUrl = null, thumb = null))
+                    }
                     if (ttsOn && ttsReady && finalText.isNotBlank()) {
                         tts.speak(cleanForTts(finalText), TextToSpeech.QUEUE_FLUSH, null, "ans")
                     }
@@ -437,6 +450,7 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
                 .padding(8.dp),
             verticalAlignment = Alignment.Bottom
         ) {
+            MicButton(onText = { input = it })
             TextButton(
                 onClick = {
                     picker.launch(

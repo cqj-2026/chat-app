@@ -5,3 +5,8 @@ local.properties
 build/
 captures/
 *.apk
+
+# 本地备份文件
+*.bak
+*.bak*
+*.orig
