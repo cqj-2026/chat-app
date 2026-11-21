@@ -15,16 +15,29 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
-
-      - name: 安装 SDK 组件
+      - name: 准备 Android SDK
         run: |
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls "$ANDROID_HOME"
+          SDKM="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin 2>/dev/null | head -1)"
+          echo "SDKMANAGER_DIR=$SDKM"
+          export PATH="$SDKM:$PATH"
+          sdkmanager --version
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+          sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "$SDKM" >> "$GITHUB_PATH"
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+
+      - name: 环境信息
+        run: |
+          java -version
+          gradle --version
+          echo "ANDROID_HOME=$ANDROID_HOME"
 
       - name: 构建 debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
