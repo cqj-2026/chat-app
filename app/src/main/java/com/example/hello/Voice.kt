@@ -24,7 +24,7 @@ class VoiceAsr(private val ctx: Context) {
     private var rec: SpeechRecognizer? = null
 
     fun stop() {
-        runCatching { rec?.stop() }
+        runCatching { rec?.cancel() }
         runCatching { rec?.destroy() }
         rec = null
     }
