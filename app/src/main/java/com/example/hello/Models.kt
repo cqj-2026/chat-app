@@ -19,6 +19,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
@@ -30,37 +31,37 @@ import java.util.zip.GZIPInputStream
 object ModelIO {
 
     private val http = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
     fun dirOf(ctx: Context, name: String): File =
         File(ctx.filesDir, "models/$name").apply { mkdirs() }
 
-    /** 判断模型目录是否已就绪：至少有一个 .onnx 文件 */
-    fun isReady(ctx: Context, name: String): Boolean {
-        val d = dirOf(ctx, name)
-        return d.listFiles()?.any { it.extension.equals("onnx", true) } == true
+    private fun extOf(url: String): String = when {
+        url.contains(".tar.bz2", true) -> ".tar.bz2"
+        url.contains(".tar.gz", true) -> ".tar.gz"
+        url.contains(".tgz", true) -> ".tgz"
+        url.contains(".onnx", true) -> ".onnx"
+        else -> ""
     }
 
+    /** 目录里是否有模型文件 */
+    fun isReady(ctx: Context, name: String): Boolean = onnxCount(ctx, name) > 0
+
+    fun onnxCount(ctx: Context, name: String): Int =
+        dirOf(ctx, name).walkTopDown().count { it.isFile && it.extension.equals("onnx", true) }
+
     fun sizeOf(ctx: Context, name: String): Long {
-        val d = dirOf(ctx, name)
         var s = 0L
-        d.listFiles()?.forEach { s += it.length() }
+        dirOf(ctx, name).walkTopDown().forEach { if (it.isFile) s += it.length() }
         return s
     }
 
-    /**
-     * 下载到 dest。已存在部分则用 Range 续传。
-     * onProgress(已下载字节, 总字节或 -1)
-     */
-    fun download(
-        url: String,
-        dest: File,
-        onProgress: (Long, Long) -> Unit
-    ) {
+    /** 下载到 dest，支持 Range 续传 */
+    fun download(url: String, dest: File, onProgress: (Long, Long) -> Unit) {
         val already = if (dest.exists()) dest.length() else 0L
-        val builder = Request.Builder().url(url)
+        val builder = Request.Builder().url(url).header("User-Agent", "dsh-chat-app")
         if (already > 0) builder.addHeader("Range", "bytes=$already-")
 
         http.newCall(builder.build()).execute().use { resp ->
@@ -68,21 +69,17 @@ object ModelIO {
                 throw IllegalStateException("HTTP ${resp.code}")
             }
             val body = resp.body ?: throw IllegalStateException("空响应")
-            val total = if (resp.code == 206) {
-                // Content-Range: bytes 100-999/1000
-                resp.header("Content-Range")
-                    ?.substringAfterLast('/')?.toLongOrNull() ?: -1L
-            } else body.contentLength()
-
-            val out = FileOutputStream(dest, already > 0 && resp.code == 206)
+            val resuming = resp.code == 206
+            val total = if (resuming) {
+                resp.header("Content-Range")?.substringAfterLast('/')?.toLongOrNull() ?: -1L
+            } else {
+                body.contentLength()
+            }
+            val out = FileOutputStream(dest, resuming)
+            if (!resuming) runCatching { out.channel.truncate(0) }
+            var written = if (resuming) already else 0L
             body.byteStream().use { input ->
                 val buf = ByteArray(64 * 1024)
-                var written = if (resp.code == 206) already else 0L
-                if (resp.code != 206 && already > 0) {
-                    // 服务端不支持续传，重新写
-                    out.channel.truncate(0)
-                    written = 0L
-                }
                 while (true) {
                     val n = input.read(buf)
                     if (n <= 0) break
@@ -96,21 +93,26 @@ object ModelIO {
         }
     }
 
-    /** 解包 .tar.bz2 / .tar.gz / 单文件。返回解出的文件数 */
+    /** 按文件头魔数判断格式并解包；不是压缩包就当作单文件拷贝 */
     fun extract(archive: File, outDir: File): Int {
         outDir.mkdirs()
-        val name = archive.name.lowercase()
-        if (!name.endsWith(".tar.bz2") && !name.endsWith(".tar.gz") && !name.endsWith(".tgz")) {
-            archive.copyTo(File(outDir, archive.name), overwrite = true)
+        val head = ByteArray(3)
+        runCatching { FileInputStream(archive).use { it.read(head) } }
+
+        val isBz2 = head[0] == 'B'.code.toByte() &&
+            head[1] == 'Z'.code.toByte() &&
+            head[2] == 'h'.code.toByte()
+        val isGz = head[0] == 0x1f.toByte() && head[1] == 0x8b.toByte()
+
+        if (!isBz2 && !isGz) {
+            val target = File(outDir, archive.name.removeSuffix(".pkg"))
+            archive.copyTo(target, overwrite = true)
             return 1
         }
+
         var count = 0
-        BufferedInputStream(archive.inputStream()).use { bin ->
-            val dec = if (name.endsWith(".tar.bz2")) {
-                BZip2CompressorInputStream(bin, true)
-            } else {
-                GZIPInputStream(bin)
-            }
+        BufferedInputStream(FileInputStream(archive)).use { bin ->
+            val dec = if (isBz2) BZip2CompressorInputStream(bin, true) else GZIPInputStream(bin)
             TarArchiveInputStream(dec).use { tar ->
                 var entry = tar.nextTarEntry
                 while (entry != null) {
@@ -136,7 +138,7 @@ object ModelIO {
         return count
     }
 
-    /** 下载 + 解包，一步到位 */
+    /** 下载 + 解包。会先清空旧目录，避免上次失败留下残渣 */
     fun fetchAndExtract(
         ctx: Context,
         name: String,
@@ -144,25 +146,31 @@ object ModelIO {
         onProgress: (Long, Long) -> Unit
     ): String {
         val dir = dirOf(ctx, name)
-        val tmp = File(ctx.cacheDir, "$name.pkg")
+        dir.walkTopDown().filter { it.isFile }.forEach { runCatching { it.delete() } }
+
+        val tmp = File(ctx.cacheDir, "$name.pkg" + extOf(url))
         download(url, tmp, onProgress)
         val n = extract(tmp, dir)
-        tmp.delete()
-        return "解出 $n 个文件，共 ${sizeOf(ctx, name) / 1024 / 1024} MB"
+        runCatching { tmp.delete() }
+
+        val onnx = onnxCount(ctx, name)
+        if (onnx == 0) {
+            throw IllegalStateException("解包后没找到 .onnx 模型文件（解出 $n 个文件），地址可能不是模型压缩包")
+        }
+        return "解出 $n 个文件，模型 ${sizeOf(ctx, name) / 1024 / 1024} MB"
     }
 }
 
-/** 模型管理页：两个模型的下载入口 */
+/** 模型管理页 */
 @Composable
 fun ModelScreen(onBack: () -> Unit) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    val asr = remember { CfgLocal.load(ctx, "asr_url") }
-    val tts = remember { CfgLocal.load(ctx, "tts_url") }
-    var asrUrl by remember { mutableStateOf(asr) }
-    var ttsUrl by remember { mutableStateOf(tts) }
+    var asrUrl by remember { mutableStateOf(CfgLocal.load(ctx, "asr_url")) }
+    var ttsUrl by remember { mutableStateOf(CfgLocal.load(ctx, "tts_url")) }
     var busy by remember { mutableStateOf("") }
     var msg by remember { mutableStateOf("") }
     var pct by remember { mutableStateOf(0) }
+    var tick by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
 
@@ -184,9 +192,15 @@ fun ModelScreen(onBack: () -> Unit) {
                 }
                 msg = "$name 完成：$r"
             } catch (e: Exception) {
-                msg = "$name 失败：${e.message}"
+                val why = when (e) {
+                    is java.net.UnknownHostException -> "域名解析失败（网络或 DNS 问题），可以换网络或换镜像地址"
+                    is java.net.SocketTimeoutException -> "连接超时，换个地址或稍后重试"
+                    else -> e.message ?: e.toString()
+                }
+                msg = "$name 失败：$why"
             } finally {
                 busy = ""
+                tick++
             }
         }
     }
@@ -205,21 +219,25 @@ fun ModelScreen(onBack: () -> Unit) {
         }
 
         Text(
-            "模型文件较大，建议接 WiFi。下载中断后再点一次会断点续传。",
+            "模型较大，建议接 WiFi。中断后再点一次会断点续传。",
             fontSize = 12.sp, color = Color(0xFF8A93A0)
         )
 
-        // 语音识别
+        // ---------- 语音识别 ----------
         Text("语音识别", fontSize = 15.sp, color = Color(0xFFE8EEF5))
-        val asrReady = ModelIO.isReady(ctx, "asr")
-        Text(
-            if (asrReady) "已就绪 · ${ModelIO.sizeOf(ctx, "asr") / 1024 / 1024} MB" else "未下载",
-            fontSize = 12.sp, color = if (asrReady) Color(0xFF6FD08C) else Color(0xFF8A93A0)
-        )
+        run {
+            val n = ModelIO.onnxCount(ctx, "asr")
+            Text(
+                if (n > 0) "已就绪 · ${ModelIO.sizeOf(ctx, "asr") / 1024 / 1024} MB" else "未下载",
+                fontSize = 12.sp,
+                color = if (n > 0) Color(0xFF6FD08C) else Color(0xFF8A93A0)
+            )
+        }
         OutlinedTextField(
-            value = asrUrl, onValueChange = { asrUrl = it; CfgLocal.save(ctx, "asr_url", it) },
-            label = { Text("模型下载地址（.tar.bz2 或 .onnx）") },
-            singleLine = false, maxLines = 3,
+            value = asrUrl,
+            onValueChange = { asrUrl = it; CfgLocal.save(ctx, "asr_url", it) },
+            label = { Text("模型下载地址（.tar.bz2）") },
+            maxLines = 4,
             modifier = Modifier.fillMaxWidth()
         )
         Button(
@@ -230,17 +248,21 @@ fun ModelScreen(onBack: () -> Unit) {
 
         HorizontalDivider()
 
-        // 语音合成
+        // ---------- 语音合成 ----------
         Text("语音合成", fontSize = 15.sp, color = Color(0xFFE8EEF5))
-        val ttsReady = ModelIO.isReady(ctx, "tts")
-        Text(
-            if (ttsReady) "已就绪 · ${ModelIO.sizeOf(ctx, "tts") / 1024 / 1024} MB" else "未下载",
-            fontSize = 12.sp, color = if (ttsReady) Color(0xFF6FD08C) else Color(0xFF8A93A0)
-        )
+        run {
+            val n = ModelIO.onnxCount(ctx, "tts")
+            Text(
+                if (n > 0) "已就绪 · ${ModelIO.sizeOf(ctx, "tts") / 1024 / 1024} MB" else "未下载",
+                fontSize = 12.sp,
+                color = if (n > 0) Color(0xFF6FD08C) else Color(0xFF8A93A0)
+            )
+        }
         OutlinedTextField(
-            value = ttsUrl, onValueChange = { ttsUrl = it; CfgLocal.save(ctx, "tts_url", it) },
+            value = ttsUrl,
+            onValueChange = { ttsUrl = it; CfgLocal.save(ctx, "tts_url", it) },
             label = { Text("模型下载地址（.tar.bz2）") },
-            singleLine = false, maxLines = 3,
+            maxLines = 4,
             modifier = Modifier.fillMaxWidth()
         )
         Button(
@@ -253,10 +275,13 @@ fun ModelScreen(onBack: () -> Unit) {
             Spacer(Modifier.height(6.dp))
             Text(msg, fontSize = 12.sp, color = Color(0xFFFFC08A))
         }
+        Spacer(Modifier.height(4.dp))
+        Text("tip：地址可填镜像，例如 https://ghfast.top/ 加在原地址前面",
+            fontSize = 11.sp, color = Color(0xFF6E7681))
     }
 }
 
-/** 极简键值存储，避免为两个字段再引一个依赖 */
+/** 极简键值存储 */
 object CfgLocal {
     fun load(ctx: Context, k: String): String =
         ctx.getSharedPreferences("modelcfg", Context.MODE_PRIVATE).getString(k, "") ?: ""
