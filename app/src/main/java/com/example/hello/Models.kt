@@ -138,7 +138,15 @@ object ModelIO {
         return count
     }
 
-    /** 下载 + 解包。会先清空旧目录，避免上次失败留下残渣 */
+    // GitHub 直连不通时依次尝试的镜像前缀（空串表示直连）
+    private val MIRRORS = listOf(
+        "",
+        "https://ghfast.top/",
+        "https://gh-proxy.com/",
+        "https://ghproxy.net/"
+    )
+
+    /** 下载 + 解包。GitHub 不通时自动尝试镜像；会先清空旧目录 */
     fun fetchAndExtract(
         ctx: Context,
         name: String,
@@ -148,16 +156,32 @@ object ModelIO {
         val dir = dirOf(ctx, name)
         dir.walkTopDown().filter { it.isFile }.forEach { runCatching { it.delete() } }
 
-        val tmp = File(ctx.cacheDir, "$name.pkg" + extOf(url))
-        download(url, tmp, onProgress)
-        val n = extract(tmp, dir)
-        runCatching { tmp.delete() }
-
-        val onnx = onnxCount(ctx, name)
-        if (onnx == 0) {
-            throw IllegalStateException("解包后没找到 .onnx 模型文件（解出 $n 个文件），地址可能不是模型压缩包")
+        val raw = url.trim()
+        val alreadyProxied = raw.indexOf("http", 4) > 0
+        val attempts: List<String> = when {
+            alreadyProxied -> listOf(raw)
+            raw.contains("github.com") -> MIRRORS.map { it + raw }
+            else -> listOf(raw)
         }
-        return "解出 $n 个文件，模型 ${sizeOf(ctx, name) / 1024 / 1024} MB"
+
+        var lastErr: Exception? = null
+        for (u in attempts) {
+            val tmp = File(ctx.cacheDir, "$name.pkg" + extOf(raw))
+            try {
+                runCatching { tmp.delete() }
+                download(u, tmp, onProgress)
+                val n = extract(tmp, dir)
+                runCatching { tmp.delete() }
+                val onnx = onnxCount(ctx, name)
+                if (onnx == 0) {
+                    throw IllegalStateException("解包后没找到 .onnx 模型文件（解出 $n 个文件）")
+                }
+                return "解出 $n 个文件，模型 ${sizeOf(ctx, name) / 1024 / 1024} MB"
+            } catch (e: Exception) {
+                lastErr = e
+            }
+        }
+        throw lastErr ?: IllegalStateException("下载失败")
     }
 }
 
