@@ -326,6 +326,9 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
     var pending by remember { mutableStateOf<Pair<Bitmap, String>?>(null) }
     var ttsOn by remember { mutableStateOf(false) }
     var ttsReady by remember { mutableStateOf(false) }
+    val sherpaTts = remember { SherpaTts(ctx) }
+    val sherpaTtsReady = remember { SherpaTts.isReady(ctx) }
+    DisposableEffect(Unit) { onDispose { sherpaTts.release() } }
 
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -401,8 +404,13 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
                         hist.append(userMsg.copy(imageUrl = null, thumb = null))
                         hist.append(savedMsg.copy(imageUrl = null, thumb = null))
                     }
-                    if (ttsOn && ttsReady && finalText.isNotBlank()) {
-                        tts.speak(cleanForTts(finalText), TextToSpeech.QUEUE_FLUSH, null, "ans")
+                    if (ttsOn && finalText.isNotBlank()) {
+                        val spoken = if (sherpaTtsReady) {
+                            runCatching { sherpaTts.speak(cleanForTts(finalText)) }.getOrDefault(false)
+                        } else false
+                        if (!spoken && ttsReady) {
+                            tts.speak(cleanForTts(finalText), TextToSpeech.QUEUE_FLUSH, null, "ans")
+                        }
                     }
                 }
             }

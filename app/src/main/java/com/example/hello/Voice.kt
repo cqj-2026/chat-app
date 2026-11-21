@@ -17,8 +17,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
-/** 封装系统语音识别：优先用设备端离线模型，不联网、不增加 APK 体积 */
+/** 系统语音识别（sherpa 模型未下载时的兜底） */
 class VoiceAsr(private val ctx: Context) {
 
     private var rec: SpeechRecognizer? = null
@@ -35,8 +38,6 @@ class VoiceAsr(private val ctx: Context) {
             onFail("此设备没有可用的语音识别服务")
             return
         }
-
-        // API 31+ 优先用设备端识别器（完全离线）
         val onDeviceOk = if (Build.VERSION.SDK_INT >= 31) {
             runCatching { SpeechRecognizer.isOnDeviceRecognitionAvailable(ctx) }.getOrDefault(false)
         } else false
@@ -44,10 +45,7 @@ class VoiceAsr(private val ctx: Context) {
         val created = if (onDeviceOk) {
             runCatching { SpeechRecognizer.createOnDeviceSpeechRecognizer(ctx) }.getOrNull()
         } else null
-
-        val finalRec = created
-            ?: runCatching { SpeechRecognizer.createSpeechRecognizer(ctx) }.getOrNull()
-
+        val finalRec = created ?: runCatching { SpeechRecognizer.createSpeechRecognizer(ctx) }.getOrNull()
         if (finalRec == null) {
             onFail("无法创建语音识别器")
             return
@@ -62,12 +60,10 @@ class VoiceAsr(private val ctx: Context) {
             override fun onEndOfSpeech() = onState(false)
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
-
             override fun onError(error: Int) {
                 onState(false)
                 onFail(errText(error))
             }
-
             override fun onResults(results: Bundle?) {
                 onState(false)
                 val list = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
@@ -77,17 +73,12 @@ class VoiceAsr(private val ctx: Context) {
         })
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-            putExtra(
-                RecognizerIntent.EXTRA_LANGUAGE_MODEL,
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM
-            )
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "zh-CN")
             putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
-            putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false)
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
         }
-        runCatching { finalRec.startListening(intent) }
-            .onFailure { onFail("启动识别失败") }
+        runCatching { finalRec.startListening(intent) }.onFailure { onFail("启动识别失败") }
     }
 
     private fun errText(code: Int): String = when (code) {
@@ -104,48 +95,94 @@ class VoiceAsr(private val ctx: Context) {
     }
 }
 
-/** 麦克风按钮：点一下开始听，再点一下停止 */
+/**
+ * 麦克风按钮。
+ * 已下载 sherpa 模型 → 自己录音 + 离线识别（不依赖系统、不联网）
+ * 没下载 → 退回系统识别
+ */
 @Composable
 fun MicButton(onText: (String) -> Unit) {
     val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
     var listening by remember { mutableStateOf(false) }
-    val asr = remember { VoiceAsr(ctx) }
+    var busy by remember { mutableStateOf(false) }
+
+    val useSherpa = remember { SherpaAsr.isReady(ctx) }
+    val sherpa = remember { if (useSherpa) SherpaAsr(ctx) else null }
+    val capture = remember { if (useSherpa) AudioCapture() else null }
+    val system = remember { if (!useSherpa) VoiceAsr(ctx) else null }
 
     DisposableEffect(Unit) {
-        onDispose { asr.stop() }
+        onDispose {
+            runCatching { capture?.stop() }
+            sherpa?.release()
+            system?.stop()
+        }
     }
 
-    fun begin() {
-        asr.start(
-            onText = { t ->
-                listening = false
-                onText(t)
-            },
-            onFail = { msg ->
-                listening = false
-                Toast.makeText(ctx, msg, Toast.LENGTH_SHORT).show()
-            },
-            onState = { st -> listening = st }
-        )
+    fun toast(m: String) = Toast.makeText(ctx, m, Toast.LENGTH_SHORT).show()
+
+    fun startListening() {
+        if (capture != null) {
+            if (capture.start()) {
+                listening = true
+            } else {
+                toast("无法打开麦克风")
+            }
+        } else if (system != null) {
+            system.start(
+                onText = { t -> listening = false; onText(t) },
+                onFail = { m -> listening = false; toast(m) },
+                onState = { st -> listening = st }
+            )
+        }
+    }
+
+    fun stopListening() {
+        if (capture != null && sherpa != null) {
+            val samples = capture.stop()
+            listening = false
+            if (samples.size < 16000 / 2) {
+                toast("录得太短了")
+                return
+            }
+            busy = true
+            scope.launch {
+                val text = withContext(Dispatchers.IO) {
+                    runCatching { sherpa.recognize(samples) }.getOrDefault("")
+                }
+                busy = false
+                if (text.isBlank()) toast("没听清，再说一次") else onText(text)
+            }
+        } else {
+            system?.stop()
+            listening = false
+        }
     }
 
     val permLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
-        if (granted) begin()
-        else Toast.makeText(ctx, "没有麦克风权限", Toast.LENGTH_SHORT).show()
+        if (granted) startListening() else toast("没有麦克风权限")
     }
 
     TextButton(onClick = {
+        if (busy) return@TextButton
         if (listening) {
-            asr.stop()
-            listening = false
+            stopListening()
         } else {
-            val granted = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
+            val ok = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
                 PackageManager.PERMISSION_GRANTED
-            if (granted) begin() else permLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            if (ok) startListening() else permLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }) {
-        Text(if (listening) "🔴" else "🎤", fontSize = 20.sp)
+        Text(
+            when {
+                busy -> "⏳"
+                listening -> "🔴"
+                else -> "🎤"
+            },
+            fontSize = 20.sp
+        )
     }
 }

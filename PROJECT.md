@@ -165,3 +165,54 @@ AAR 下载地址：
 
 尚未完成：把模型接到 sherpa-onnx 的识别/合成 API 上，
 需要先拿到 AAR 的真实类与方法签名（由 CI 的 `javap` 步骤导出）。
+
+## sherpa-onnx 接入（v0.12）
+
+### 构建配置
+
+| 项 | 值 |
+|---|---|
+| AAR | `libs/sherpa-onnx-2.0.2.aar`（52 MB，CI 里下载并缓存） |
+| ABI | 只打 `arm64-v8a`（jni 里该目录 32 MB） |
+| 原生库压缩 | `useLegacyPackaging = true` |
+| onnx 不压缩 | `androidResources { noCompress += "onnx" }` |
+| 混淆 | `-keep class com.k2fsa.sherpa.onnx.** { *; }` |
+| **实测 APK** | **13.7 MB**（不压缩会是 33 MB） |
+
+### 代码结构
+
+```
+Sherpa.kt
+├── SherpaFiles    模型目录里定位 onnx / tokens
+├── AudioCapture   AudioRecord 16k 单声道 → FloatArray
+├── SherpaAsr      OfflineRecognizer，自动区分 paraformer / zipformer-ctc
+├── SherpaTts      OfflineTts（VITS），生成 PCM
+└── AudioSink      AudioTrack 播放
+```
+
+识别和合成都做了**优雅降级**：模型没下载就自动退回系统引擎。
+
+### 推荐模型地址（填到 App 的「语音模型管理」）
+
+语音识别（48.2 MB，int8，快）
+```
+https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-zipformer-ctc-small-zh-int8-2025-07-16.tar.bz2
+```
+
+语音合成（13.4 MB，女声）
+```
+https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-zh_CN-xiao_ya-medium-int8.tar.bz2
+```
+
+备选：识别用 paraformer-zh-small（74.3 MB，准确率更高）；合成用
+vits-icefall-zh-aishell3（30.1 MB）。
+
+### 关键 API（来自 CI 的 javap 实测，勿凭记忆写）
+
+```kotlin
+OfflineRecognizer(assetManager, OfflineRecognizerConfig(featConfig, modelConfig, decodingMethod))
+  .createStream().acceptWaveform(FloatArray, Int) → decode(stream) → getResult(stream).text
+
+OfflineTts(assetManager, OfflineTtsConfig(model = OfflineTtsModelConfig(vits = ...)))
+  .generate(text, speakerId, speed) → GeneratedAudio.samples / .sampleRate
+```
