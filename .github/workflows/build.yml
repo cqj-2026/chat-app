@@ -39,6 +39,21 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
 
+      - name: 缓存 sherpa-onnx AAR
+        uses: actions/cache@v4
+        with:
+          path: app/libs/sherpa-onnx-2.0.2.aar
+          key: sherpa-onnx-aar-2.0.2
+
+      - name: 准备 sherpa-onnx AAR（构建用）
+        run: |
+          mkdir -p app/libs
+          if [ ! -f app/libs/sherpa-onnx-2.0.2.aar ]; then
+            curl -sL --max-time 300 -o app/libs/sherpa-onnx-2.0.2.aar \
+              "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-2.0.2.aar"
+          fi
+          ls -l app/libs
+
       - name: 下载 sherpa-onnx AAR 并导出 API 签名
         continue-on-error: true
         run: |
@@ -50,9 +65,9 @@ jobs:
           echo "=== 顶层 ==="; ls -l
           echo "=== jni 各 ABI 体积 ==="; du -sh jni/* 2>/dev/null
           echo "=== 关键类方法 ==="
-          for c in OfflineRecognizer OfflineRecognizerConfig OfflineModelConfig OfflineTts OfflineTtsConfig OfflineTtsModelConfig OfflineTtsVitsModelConfig; do
+          for c in OfflineRecognizerConfig OfflineModelConfig OfflineRecognizerResult OfflineStream FeatureConfig OfflineParaformerModelConfig OfflineZipformerCtcModelConfig OfflineTransducerModelConfig OfflineTtsConfig OfflineTtsModelConfig OfflineTtsVitsModelConfig GeneratedAudio GenerationConfig OfflineRecognizer; do
             echo "---- $c ----"
-            javap -classpath classes.jar "com.k2fsa.sherpa.onnx.$c" 2>/dev/null | head -40
+            javap -p -classpath classes.jar "com.k2fsa.sherpa.onnx.$c" 2>/dev/null | grep -vE "component|copy\$|toString|hashCode|equals" | head -60
           done
 
       - name: 准备 Android SDK

@@ -9,11 +9,12 @@ android {
     compileSdk = 34
 
     defaultConfig {
+        ndk { abiFilters.add("arm64-v8a") }
         applicationId = "com.example.hello"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.10"
+        versionCode = 11
+        versionName = "0.11"
     }
 
     buildFeatures {
@@ -36,6 +37,14 @@ android {
         }
     }
 
+    packaging {
+        jniLibs { useLegacyPackaging = true }
+    }
+
+    androidResources {
+        noCompress += "onnx"
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -53,4 +62,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.apache.commons:commons-compress:1.26.2")
+    implementation(files("libs/sherpa-onnx-2.0.2.aar"))
 }
