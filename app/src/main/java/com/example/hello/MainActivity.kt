@@ -238,7 +238,8 @@ fun Root() {
             Box(Modifier.fillMaxSize()) {
                 when (stage) {
                     0 -> BootScreen(cfg = cfg) { stage = 1 }
-                    1 -> AboutScreen { stage = 2 }
+                    1 -> LoginScreen { _ -> stage = 2 }
+                    2 -> AboutScreen { stage = 3 }
                     else -> if (showCfg) {
                         CfgScreen(
                             init = cfg,

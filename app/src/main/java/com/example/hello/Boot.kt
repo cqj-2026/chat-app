@@ -1,5 +1,6 @@
 package com.example.hello
 
+import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -7,68 +8,74 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
 private data class BootLine(val idx: Int, val label: String, val value: String, val ok: Boolean)
 
-private val GREEN = Color(0xFF4ADE80)
-private val AMBER = Color(0xFFFBBF24)
-private val DIM = Color(0xFF3F4A57)
-private val FG = Color(0xFF9CA3AF)
+private val B_GREEN = Color(0xFF4ADE80)
+private val B_AMBER = Color(0xFFFBBF24)
+private val B_DIM = Color(0xFF3F4A57)
+private val B_FG = Color(0xFF9CA3AF)
+private val B_BLUE = Color(0xFF4D8DFF)
 
 /**
- * 开屏自检：逐行扫描各模块状态，像终端启动日志。
- * 点击任意位置可跳过。全部用本地状态判断，不联网、不申请权限。
+ * 开屏自检。扫描完成后底部出现 "Please touch to start"，
+ * 点击才进入下一步；扫描过程中点击可立即完成。
  */
 @Composable
 fun BootScreen(cfg: Cfg, onDone: () -> Unit) {
     val ctx = LocalContext.current
     val lines = remember { mutableStateListOf<BootLine>() }
     var finished by remember { mutableStateOf(false) }
-    var skipped by remember { mutableStateOf(false) }
+    var aborted by remember { mutableStateOf(false) }
     val hist = remember { History(ctx) }
 
     LaunchedEffect(Unit) {
         var i = 0
         fun add(label: String, value: String, ok: Boolean) {
+            if (aborted) return
             i += 1
             lines.add(BootLine(i, label, value, ok))
         }
+        fun step(label: String, value: String, ok: Boolean) {
+            add(label, value, ok)
+        }
 
-        delay(120)
-        add("API ENDPOINT", if (cfg.base.isBlank()) "not set" else shortUrl(cfg.base), cfg.base.isNotBlank())
-        delay(110)
-        add("API KEY", if (cfg.key.isBlank()) "not set" else "****" + cfg.key.takeLast(4), cfg.key.isNotBlank())
-        delay(110)
-        add("CHAT MODEL", if (cfg.model.isBlank()) "not set" else cfg.model, cfg.model.isNotBlank())
-        delay(110)
+        val ver = runCatching {
+            ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName
+        }.getOrNull() ?: "?"
+
+        step("APP VERSION", ver, true); delay(90)
+        step("ANDROID SDK", Build.VERSION.SDK_INT.toString(), true); delay(90)
+        step("DEVICE", Build.MODEL ?: "unknown", true); delay(90)
+        step("ABI", Build.SUPPORTED_ABIS.firstOrNull() ?: "?", true); delay(90)
+        step("HEAP LIMIT", (Runtime.getRuntime().maxMemory() / 1024 / 1024).toString() + " MB", true); delay(90)
+        step("API ENDPOINT", if (cfg.base.isBlank()) "not set" else shortBootUrl(cfg.base), cfg.base.isNotBlank()); delay(90)
+        step("API KEY", if (cfg.key.isBlank()) "not set" else "****" + cfg.key.takeLast(4), cfg.key.isNotBlank()); delay(90)
+        step("CHAT MODEL", if (cfg.model.isBlank()) "not set" else cfg.model, cfg.model.isBlank().not()); delay(90)
         val histCount = runCatching { hist.load().size }.getOrDefault(0)
-        add("HISTORY", histCount.toString() + " msgs", true)
-        delay(110)
-        val asrReady = runCatching { SherpaAsr.isReady(ctx) }.getOrDefault(false)
-        add("ASR MODEL", if (asrReady) "ready" else "missing", asrReady)
-        delay(110)
-        val ttsReady = runCatching { SherpaTts.isReady(ctx) }.getOrDefault(false)
-        add("TTS MODEL", if (ttsReady) "ready" else "missing", ttsReady)
-        delay(110)
-        val imgReady = ImageGen.ready(cfg)
-        add("IMAGE GEN", if (imgReady) "ready" else "not set", imgReady)
-        delay(110)
-        add("PERSONA", if (cfg.persona.isBlank()) "default" else "custom", true)
-        delay(110)
-        add("FILE READ", "enabled", true)
-        delay(110)
-        add("SPLIT 50", if (cfg.seg50) "on" else "off", true)
-        delay(320)
+        step("HISTORY", histCount.toString() + " msgs", true); delay(90)
+        val asrOk = runCatching { SherpaAsr.isReady(ctx) }.getOrDefault(false)
+        val asrSize = runCatching { ModelIO.sizeOf(ctx, "asr") / 1024 / 1024 }.getOrDefault(0L)
+        step("ASR MODEL", if (asrOk) asrSize.toString() + " MB" else "missing", asrOk); delay(90)
+        val ttsOk = runCatching { SherpaTts.isReady(ctx) }.getOrDefault(false)
+        val ttsSize = runCatching { ModelIO.sizeOf(ctx, "tts") / 1024 / 1024 }.getOrDefault(0L)
+        step("TTS MODEL", if (ttsOk) ttsSize.toString() + " MB" else "missing", ttsOk); delay(90)
+        val imgOk = ImageGen.ready(cfg)
+        step("IMAGE GEN", if (imgOk) "ready" else "not set", imgOk); delay(90)
+        step("PERSONA", if (cfg.persona.isBlank()) "default" else "custom", true); delay(90)
+        step("SPLIT 50", if (cfg.seg50) "on" else "off", true); delay(90)
+        step("FILE READ", "enabled", true); delay(90)
+        step("TTS CHUNK", "120 chars", true); delay(160)
         finished = true
-        delay(280)
-        if (!skipped) onDone()
     }
 
     Box(
@@ -76,30 +83,34 @@ fun BootScreen(cfg: Cfg, onDone: () -> Unit) {
             .fillMaxSize()
             .background(Color(0xFF0B0D10))
             .clickable {
-                skipped = true
-                onDone()
+                if (finished) {
+                    onDone()
+                } else {
+                    aborted = true
+                    finished = true
+                }
             }
     ) {
         Column(
             Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
-                .padding(horizontal = 20.dp, vertical = 26.dp)
+                .padding(horizontal = 18.dp, vertical = 22.dp)
         ) {
             Text(
                 "chat-app // boot",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 13.sp,
-                color = GREEN
+                color = B_GREEN
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(3.dp))
             Text(
-                "self-check...",
+                if (finished) "scan complete" else "self-check...",
                 fontFamily = FontFamily.Monospace,
                 fontSize = 11.sp,
-                color = DIM
+                color = B_DIM
             )
-            Spacer(Modifier.height(14.dp))
+            Spacer(Modifier.height(12.dp))
 
             Column(
                 Modifier
@@ -108,56 +119,46 @@ fun BootScreen(cfg: Cfg, onDone: () -> Unit) {
             ) {
                 lines.forEach { l ->
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = 3.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Text(
                             "[" + l.idx.toString().padStart(2, '0') + "]",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                            color = DIM
+                            fontFamily = FontFamily.Monospace, fontSize = 11.sp, color = B_DIM
                         )
                         Text(
                             l.label,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                            color = FG,
-                            modifier = Modifier.width(108.dp)
+                            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                            color = B_FG, modifier = Modifier.width(96.dp)
                         )
                         Text(
                             if (l.ok) "OK" else "--",
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                            color = if (l.ok) GREEN else AMBER
+                            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                            color = if (l.ok) B_GREEN else B_AMBER
                         )
                         Text(
                             l.value,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                            color = if (l.ok) FG else AMBER
+                            fontFamily = FontFamily.Monospace, fontSize = 11.sp,
+                            color = if (l.ok) B_FG else B_AMBER
                         )
                     }
                 }
-                if (finished) {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        "> ready",
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp,
-                        color = GREEN
-                    )
-                }
             }
 
-            Text(
-                "点击跳过",
-                fontFamily = FontFamily.Monospace,
-                fontSize = 10.sp,
-                color = DIM
-            )
+            if (finished) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Please touch to start",
+                    fontSize = 24.sp,
+                    color = B_BLUE,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+            }
         }
     }
 }
 
-private fun shortUrl(u: String): String =
-    u.removePrefix("https://").removePrefix("http://").trimEnd('/').take(30)
+private fun shortBootUrl(u: String): String =
+    u.removePrefix("https://").removePrefix("http://").trimEnd('/').take(26)

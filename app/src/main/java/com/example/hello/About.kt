@@ -20,13 +20,12 @@ private const val RELEASE_URL =
     "https://github.com/cqj-2026/chat-app/releases/latest/download/app-release.apk"
 
 /**
- * 开发者信息页：自检之后短暂展示，点击可跳过。
- * 纯文字，零额外依赖与体积。
+ * 开发者信息页：淡入后停留，点击任意位置才进入下一步。
  */
 @Composable
 fun AboutScreen(onDone: () -> Unit) {
     var alpha by remember { mutableStateOf(0f) }
-    var leaving by remember { mutableStateOf(false) }
+    var ready by remember { mutableStateOf(false) }
     val uriHandler = LocalUriHandler.current
 
     LaunchedEffect(Unit) {
@@ -34,62 +33,77 @@ fun AboutScreen(onDone: () -> Unit) {
             alpha += 0.085f
             delay(28)
         }
-        delay(2400)
-        leaving = true
-        onDone()
+        ready = true
     }
-
-    if (leaving) return
 
     Box(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .clickable { onDone() },
-        contentAlignment = Alignment.Center
+            .clickable { if (ready) onDone() }
     ) {
         Column(
             Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 28.dp)
-                .alpha(alpha.coerceIn(0f, 1f)),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .fillMaxSize()
+                .safeDrawingPadding()
+                .padding(horizontal = 28.dp, vertical = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text(
-                "本应用由 蔡启俊 独立开发",
-                color = Color(0xFFE8EEF5),
-                fontSize = 16.sp,
-                textAlign = TextAlign.Center
-            )
+            Spacer(Modifier.weight(1f))
 
-            Spacer(Modifier.height(6.dp))
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .alpha(alpha.coerceIn(0f, 1f)),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text(
+                    "本应用由 蔡启俊 独立开发",
+                    color = Color(0xFFE8EEF5),
+                    fontSize = 16.sp,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    "下载链接",
+                    color = Color(0xFF5B6472),
+                    fontSize = 11.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    "github.com/cqj-2026/chat-app",
+                    color = Color(0xFF4D8DFF),
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable {
+                        runCatching { uriHandler.openUri(RELEASE_URL) }
+                    }
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                Text(
+                    "技术支持：DeepSeek",
+                    color = Color(0xFF5B6472),
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            Spacer(Modifier.weight(1f))
 
             Text(
-                "下载链接",
-                color = Color(0xFF5B6472),
+                if (ready) "点击任意位置继续" else "",
+                color = Color(0xFF3F4A57),
                 fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            Text(
-                "github.com/cqj-2026/chat-app",
-                color = Color(0xFF4D8DFF),
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.clickable {
-                    runCatching { uriHandler.openUri(RELEASE_URL) }
-                }
+                modifier = Modifier.fillMaxWidth()
             )
-
             Spacer(Modifier.height(6.dp))
-
-            Text(
-                "技术支持：DeepSeek",
-                color = Color(0xFF5B6472),
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace
-            )
         }
     }
 }

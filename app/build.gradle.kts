@@ -13,8 +13,8 @@ android {
         applicationId = "com.cqj.chat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 21
-        versionName = "0.21"
+        versionCode = 23
+        versionName = "0.23"
     }
 
     buildFeatures {
