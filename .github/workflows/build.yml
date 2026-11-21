@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   apk:
     runs-on: ubuntu-latest
@@ -15,37 +18,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: 探测 sherpa-onnx 模型资产
-        continue-on-error: true
-        run: |
-          for tag in asr-models tts-models; do
-            echo "======== $tag ========"
-            curl -sL --max-time 180 \
-              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/$tag" \
-              -o "/tmp/$tag.json" || true
-            echo "json 字节: $(wc -c < /tmp/$tag.json 2>/dev/null || echo 0)"
-            awk '
-              /^ *"name": "/ { l=$0; sub(/^ *"name": "/,"",l); sub(/",?[ \t]*$/,"",l); n=l }
-              /^ *"size": [0-9]+/ {
-                s=$0; gsub(/[^0-9]/,"",s)
-                if (n ~ /(zh|aishell|baker|paraformer|zipformer|sense|kokoro|matcha)/ && n ~ /(tar\.bz2|\.onnx)$/)
-                  printf "%9.1f MB  %s\n", s/1048576, n
-                n=""
-              }
-            ' "/tmp/$tag.json" | sort -n | head -40
-          done
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-
       - name: 缓存 sherpa-onnx AAR
         uses: actions/cache@v4
         with:
           path: app/libs/sherpa-onnx-2.0.2.aar
           key: sherpa-onnx-aar-2.0.2
 
-      - name: 准备 sherpa-onnx AAR（构建用）
+      - name: 准备 sherpa-onnx AAR
         run: |
           mkdir -p app/libs
           if [ ! -f app/libs/sherpa-onnx-2.0.2.aar ]; then
@@ -53,22 +32,6 @@ jobs:
               "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-2.0.2.aar"
           fi
           ls -l app/libs
-
-      - name: 下载 sherpa-onnx AAR 并导出 API 签名
-        continue-on-error: true
-        run: |
-          AAR=/tmp/sherpa.aar
-          curl -sL --max-time 300 -o "$AAR" \
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.2/sherpa-onnx-2.0.2.aar" || true
-          echo "AAR 字节: $(wc -c < $AAR 2>/dev/null || echo 0)"
-          mkdir -p /tmp/aa && cd /tmp/aa && unzip -o -q "$AAR" || true
-          echo "=== 顶层 ==="; ls -l
-          echo "=== jni 各 ABI 体积 ==="; du -sh jni/* 2>/dev/null
-          echo "=== 关键类方法 ==="
-          for c in OfflineRecognizerConfig OfflineModelConfig OfflineRecognizerResult OfflineStream FeatureConfig OfflineParaformerModelConfig OfflineZipformerCtcModelConfig OfflineTransducerModelConfig OfflineTtsConfig OfflineTtsModelConfig OfflineTtsVitsModelConfig GeneratedAudio GenerationConfig OfflineRecognizer; do
-            echo "---- $c ----"
-            javap -p -classpath classes.jar "com.k2fsa.sherpa.onnx.$c" 2>/dev/null | grep -vE "component|copy\$|toString|hashCode|equals" | head -60
-          done
 
       - name: 准备 Android SDK
         run: |
@@ -86,7 +49,7 @@ jobs:
           path: ~/.android/debug.keystore
           key: android-debug-keystore-v1
 
-      - name: 确保签名密钥存在且固定
+      - name: 确保签名密钥固定
         run: |
           KS="$HOME/.android/debug.keystore"
           if [ ! -f "$KS" ]; then
@@ -108,9 +71,21 @@ jobs:
       - name: 报告体积
         run: |
           ls -l app/build/outputs/apk/release/
-          du -h app/build/outputs/apk/release/*.apk
+          du -h app/build/outputs/apk/release/app-release.apk
 
-      - name: 上传 APK
+      - name: 发布到 Release（免登录下载）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create latest \
+            --title "latest" \
+            --notes "commit ${{ github.sha }}" \
+            app/build/outputs/apk/release/app-release.apk
+          echo "下载地址："
+          echo "https://github.com/${{ github.repository }}/releases/latest/download/app-release.apk"
+
+      - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
         with:
           name: chat-apk
