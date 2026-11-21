@@ -10,11 +10,11 @@ android {
 
     defaultConfig {
         ndk { abiFilters.add("arm64-v8a") }
-        applicationId = "com.example.hello"
+        applicationId = "com.cqj.chat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 20
-        versionName = "0.20"
+        versionCode = 21
+        versionName = "0.21"
     }
 
     buildFeatures {
