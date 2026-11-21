@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.hello"
         minSdk = 26
         targetSdk = 34
-        versionCode = 15
-        versionName = "0.15"
+        versionCode = 20
+        versionName = "0.20"
     }
 
     buildFeatures {

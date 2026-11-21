@@ -216,3 +216,87 @@ OfflineRecognizer(assetManager, OfflineRecognizerConfig(featConfig, modelConfig,
 OfflineTts(assetManager, OfflineTtsConfig(model = OfflineTtsModelConfig(vits = ...)))
   .generate(text, speakerId, speed) → GeneratedAudio.samples / .sampleRate
 ```
+
+## v0.15 里程碑：离线语音全部打通（2026-11-21 23:17）
+
+### 验证通过
+
+- 语音识别：sherpa-onnx OfflineRecognizer + zipformer-ctc-small-zh-int8
+- 语音合成：sherpa-onnx OfflineTts + vits-piper-zh_CN-xiao_ya-medium-int8
+- 日志确认：JNI 加载 ok、模型路径解析正确、进程无崩溃
+
+### 这一轮踩过的三个坑（重要，勿重犯）
+
+**1. assetManager 必须为 null**
+
+模型在手机存储（绝对路径）时，若把 `ctx.assets` 传给
+`OfflineRecognizer` / `OfflineTts`，原生层会去 APK assets 里找文件，
+找不到就 `exit(255)`——**Java 层 try/catch 完全拦不住**，表现为「闪退」。
+
+正确写法（assetManager 有默认值 null）：
+```kotlin
+OfflineRecognizer(config = cfg)
+OfflineTts(config = cfg)
+```
+错误日志特征：
+```
+W sherpa-onnx: but assetManager is NOT set to null.
+F sherpa-onnx: Read binary file: Load '.../tokens.txt' failed
+```
+
+**2. MIUI XSpace 导致安装失败**
+
+现象：`INSTALL_FAILED_UPDATE_INCOMPATIBLE`，但重装/卸载都报
+`not installed for 0`。原因：包被装在 **user 999（XSpace 双开空间）**。
+
+排查：
+```
+pm list users          # 看到 999:XSpace
+dumpsys package com.example.hello | grep codePath   # 有记录但 user0 无
+```
+
+解决：
+```
+pm uninstall --user all com.example.hello
+pm install -r /data/local/tmp/app.apk
+```
+
+**3. /sdcard 下的 APK 不能直接 pm install**
+
+系统服务读不了 fuse 挂载的 /sdcard：
+```
+Error: Can't open file: /sdcard/Download/xxx.apk
+```
+必须先拷：
+```
+cp /sdcard/Download/xxx.apk /data/local/tmp/app.apk
+pm install -r /data/local/tmp/app.apk
+```
+
+### 签名稳定性结论
+
+多次构建的 keystore 指纹一致（actions/cache 生效）：
+```
+SHA1:   90:06:03:DE:37:AA:58:D9:98:90:80:36:06:91:A3:C9:63:A7:7A:2D
+SHA256: 4D:43:52:E5:93:85:7C:DC:C0:8A:02:E1:8B:C4:58:CA:BC:A2:AB:94:51:32:F1:55:48:42:28:C9:00:98:A9:09
+```
+安装失败是 XSpace 导致的，与签名稳定性无关。
+
+### 分发方式（仓库已改为 Public）
+
+CI 每次构建自动发布 Release：
+```
+https://github.com/cqj-2026/chat-app/releases/download/latest/app-release.apk
+```
+可走镜像加速（实测 `ghfast.top` 前缀约 65 KB/s，直连 34 KB/s）：
+```
+https://ghfast.top/https://github.com/cqj-2026/chat-app/releases/download/latest/app-release.apk
+```
+
+### 安装方式（推荐，无需界面操作）
+
+```
+cp /sdcard/Download/app-release.apk /data/local/tmp/app.apk
+pm install -r /data/local/tmp/app.apk
+```
+通过 Shizuku 执行，保留数据，无需卸载。

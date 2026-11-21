@@ -210,10 +210,34 @@ class SherpaTts(private val ctx: Context) {
     /** 合成并播放；返回是否成功 */
     fun speak(text: String): Boolean {
         val t = ensureLoaded() ?: return false
-        val audio = runCatching { t.generate(text, 0, 1.0f) }.getOrNull() ?: return false
-        if (audio.samples.isEmpty()) return false
-        AudioSink.play(audio.samples, audio.sampleRate)
-        return true
+        var ok = false
+        for (c in splitForTts(text)) {
+            val audio = runCatching { t.generate(c, 0, 1.0f) }.getOrNull() ?: continue
+            if (audio.samples.isEmpty()) continue
+            AudioSink.play(audio.samples, audio.sampleRate)
+            ok = true
+        }
+        return ok
+    }
+
+    /** 按标点切段，避免一次合成过长导致卡顿 */
+    private fun splitForTts(text: String, maxLen: Int = 120): List<String> {
+        val out = ArrayList<String>()
+        val sb = StringBuilder()
+        for (ch in text) {
+            sb.append(ch)
+            val brk = ch == 0x3002.toChar() || ch == 0xFF01.toChar() || ch == 0xFF1F.toChar() ||
+                ch == 0xFF1B.toChar() || ch == 0x0A.toChar() || ch == 0x2E.toChar() ||
+                ch == 0x21.toChar() || ch == 0x3F.toChar() || ch == 0x3B.toChar() || ch == 0xFF0C.toChar()
+            if (brk || sb.length >= maxLen) {
+                val s = sb.toString().trim()
+                if (s.isNotEmpty()) out.add(s)
+                sb.setLength(0)
+            }
+        }
+        val tail = sb.toString().trim()
+        if (tail.isNotEmpty()) out.add(tail)
+        return out
     }
 
     fun release() {
@@ -225,7 +249,9 @@ class SherpaTts(private val ctx: Context) {
 /** 播放 PCM 浮点采样 */
 object AudioSink {
 
+    /** 阻塞播放：返回时已播放完毕（调用方必须在 IO 线程） */
     fun play(samples: FloatArray, sampleRate: Int) {
+        if (samples.isEmpty() || sampleRate <= 0) return
         val pcm = ShortArray(samples.size) { i ->
             (samples[i].coerceIn(-1.0f, 1.0f) * 32767.0f).toInt().toShort()
         }
@@ -248,19 +274,15 @@ object AudioSink {
                 .setTransferMode(AudioTrack.MODE_STATIC)
                 .build()
         }.getOrNull() ?: return
-
-        runCatching {
+        try {
             track.write(pcm, 0, pcm.size)
             track.play()
-        }
-        val ms = (pcm.size * 1000L / sampleRate) + 300
-        Thread {
-            try {
-                Thread.sleep(ms)
-            } catch (_: InterruptedException) {
-            }
+            val ms = (pcm.size * 1000L / sampleRate) + 250L
+            Thread.sleep(ms)
+        } catch (e: Throwable) {
+        } finally {
             runCatching { track.stop() }
             runCatching { track.release() }
-        }.apply { isDaemon = true }.start()
+        }
     }
 }
