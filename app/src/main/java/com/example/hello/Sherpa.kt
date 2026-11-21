@@ -148,7 +148,7 @@ class SherpaAsr(private val ctx: Context) {
             modelConfig = modelCfg,
             decodingMethod = "greedy_search"
         )
-        val r = runCatching { OfflineRecognizer(ctx.assets, cfg) }.getOrNull() ?: return null
+        val r = runCatching { OfflineRecognizer(config = cfg) }.getOrNull() ?: return null
         recognizer = r
         return r
     }
@@ -192,15 +192,17 @@ class SherpaTts(private val ctx: Context) {
         val tokens = SherpaFiles.named(dir, "tokens.txt")
         val lexicon = SherpaFiles.named(dir, "lexicon.txt")
 
+        val espeakDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
+        val dataDirPath = espeakDir?.absolutePath ?: dir.absolutePath
         val vits = OfflineTtsVitsModelConfig(
             model = model,
             tokens = tokens,
             lexicon = lexicon,
-            dataDir = dir.absolutePath
+            dataDir = dataDirPath
         )
         val modelCfg = OfflineTtsModelConfig(vits = vits, numThreads = 2, debug = false)
         val cfg = OfflineTtsConfig(model = modelCfg)
-        val t = runCatching { OfflineTts(ctx.assets, cfg) }.getOrNull() ?: return null
+        val t = runCatching { OfflineTts(config = cfg) }.getOrNull() ?: return null
         tts = t
         return t
     }
