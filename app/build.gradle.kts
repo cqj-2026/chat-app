@@ -12,8 +12,8 @@ android {
         applicationId = "com.example.hello"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 3
+        versionName = "0.3"
     }
 
     buildFeatures {
@@ -22,8 +22,17 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 开启压缩：APK 从约 8MB 降到 3MB 左右
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             signingConfig = signingConfigs.getByName("debug")
+        }
+        debug {
+            isMinifyEnabled = false
         }
     }
 

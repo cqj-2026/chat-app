@@ -18,32 +18,48 @@ jobs:
       - name: 准备 Android SDK
         run: |
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          ls "$ANDROID_HOME"
           SDKM="$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin 2>/dev/null | head -1)"
-          echo "SDKMANAGER_DIR=$SDKM"
           export PATH="$SDKM:$PATH"
-          sdkmanager --version
           yes | sdkmanager --licenses > /dev/null 2>&1 || true
           sdkmanager "platforms;android-34" "build-tools;34.0.0" "platform-tools"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "$SDKM" >> "$GITHUB_PATH"
 
+      - name: 缓存签名密钥
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
+      - name: 确保签名密钥存在且固定
+        run: |
+          KS="$HOME/.android/debug.keystore"
+          if [ ! -f "$KS" ]; then
+            mkdir -p "$HOME/.android"
+            keytool -genkeypair -v \
+              -keystore "$KS" \
+              -storepass android -keypass android \
+              -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          echo "签名指纹："
+          keytool -list -v -keystore "$KS" -storepass android 2>/dev/null | grep -E 'SHA1|SHA256' | head -4
+
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
-      - name: 环境信息
-        run: |
-          java -version
-          gradle --version
-          echo "ANDROID_HOME=$ANDROID_HOME"
+      - name: 构建 release APK
+        run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: 构建 debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: 报告体积
+        run: |
+          ls -l app/build/outputs/apk/release/
+          du -h app/build/outputs/apk/release/*.apk
 
       - name: 上传 APK
         uses: actions/upload-artifact@v4
         with:
-          name: hello-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: chat-apk
+          path: app/build/outputs/apk/release/*.apk
