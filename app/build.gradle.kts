@@ -5,6 +5,15 @@ plugins {
 }
 
 android {
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     namespace = "com.example.hello"
     compileSdk = 34
 
@@ -13,8 +22,8 @@ android {
         applicationId = "com.cqj.chat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 24
-        versionName = "0.24"
+        versionCode = 25
+        versionName = "0.25"
     }
 
     buildFeatures {

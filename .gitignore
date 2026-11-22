@@ -10,3 +10,6 @@ captures/
 *.bak
 *.bak*
 *.orig
+
+# 签名密钥二进制（只提交 ci/keystore.b64）
+app/debug.keystore

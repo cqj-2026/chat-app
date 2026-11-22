@@ -18,6 +18,28 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      - name: 准备固定签名密钥
+        run: |
+          set -e
+          if [ -f ci/keystore.b64 ]; then
+            base64 -d ci/keystore.b64 > app/debug.keystore
+            echo "使用仓库内的固定密钥"
+          else
+            mkdir -p ci app
+            keytool -genkeypair -v -keystore app/debug.keystore \
+              -storepass android -keypass android -alias androiddebugkey \
+              -keyalg RSA -keysize 2048 -validity 12000 \
+              -dname "CN=Chat App,O=CQJ,C=CN"
+            base64 -w0 app/debug.keystore > ci/keystore.b64
+            git config user.name "ci-bot"
+            git config user.email "ci-bot@users.noreply.github.com"
+            git add ci/keystore.b64
+            git commit -m "ci: add fixed signing keystore [skip ci]"
+            for i in 1 2 3; do git push && break || sleep 5; done
+            echo "已生成并提交固定密钥"
+          fi
+          keytool -list -v -keystore app/debug.keystore -storepass android 2>/dev/null | grep -E "SHA1:|SHA256:" | head -2
+
       - name: 缓存 sherpa-onnx AAR
         uses: actions/cache@v4
         with:
@@ -43,24 +65,6 @@ jobs:
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "$SDKM" >> "$GITHUB_PATH"
 
-      - name: 缓存签名密钥
-        uses: actions/cache@v4
-        with:
-          path: ~/.android/debug.keystore
-          key: android-debug-keystore-v1
-
-      - name: 确保签名密钥固定
-        run: |
-          KS="$HOME/.android/debug.keystore"
-          if [ ! -f "$KS" ]; then
-            mkdir -p "$HOME/.android"
-            keytool -genkeypair -v -keystore "$KS" \
-              -storepass android -keypass android -alias androiddebugkey \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-          keytool -list -v -keystore "$KS" -storepass android 2>/dev/null | grep -E 'SHA1|SHA256' | head -4
-
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
@@ -82,8 +86,6 @@ jobs:
             --title "latest" \
             --notes "commit ${{ github.sha }}" \
             app/build/outputs/apk/release/app-release.apk
-          echo "下载地址："
-          echo "https://github.com/${{ github.repository }}/releases/latest/download/app-release.apk"
 
       - name: 上传 APK 产物
         uses: actions/upload-artifact@v4
