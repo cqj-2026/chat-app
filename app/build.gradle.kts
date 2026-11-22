@@ -13,8 +13,8 @@ android {
         applicationId = "com.cqj.chat"
         minSdk = 26
         targetSdk = 34
-        versionCode = 23
-        versionName = "0.23"
+        versionCode = 24
+        versionName = "0.24"
     }
 
     buildFeatures {
@@ -58,6 +58,7 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.06.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.activity:activity-compose:1.9.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

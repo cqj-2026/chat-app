@@ -12,6 +12,10 @@ import android.speech.SpeechRecognizer
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.HourglassEmpty
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.*
@@ -166,23 +170,25 @@ fun MicButton(onText: (String) -> Unit) {
         if (granted) startListening() else toast("没有麦克风权限")
     }
 
-    TextButton(onClick = {
-        if (busy) return@TextButton
+    ActionTile(
+        icon = when {
+            busy -> Icons.Rounded.HourglassEmpty
+            listening -> Icons.Rounded.Stop
+            else -> Icons.Rounded.Mic
+        },
+        label = when {
+            busy -> "识别中"
+            listening -> "停止"
+            else -> "语音"
+        },
+        active = listening,
+        enabled = !busy
+    ) {
         if (listening) {
             stopListening()
         } else {
-            val ok = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) ==
-                PackageManager.PERMISSION_GRANTED
+            val ok = ctx.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
             if (ok) startListening() else permLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
-    }) {
-        Text(
-            when {
-                busy -> "⏳"
-                listening -> "🔴"
-                else -> "🎤"
-            },
-            fontSize = 20.sp
-        )
     }
 }

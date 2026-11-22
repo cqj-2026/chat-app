@@ -23,6 +23,15 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.AttachFile
+import androidx.compose.material.icons.rounded.Brush
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Send
+import androidx.compose.material.icons.rounded.VolumeOff
+import androidx.compose.material.icons.rounded.VolumeUp
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -420,6 +429,7 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
 
     var attachName by remember { mutableStateOf<String?>(null) }
     var attachText by remember { mutableStateOf("") }
+    var showActions by remember { mutableStateOf(false) }
 
     val filePicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -575,11 +585,15 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
                 Text("Chat", fontSize = 16.sp, color = Color(0xFFE8EEF5))
                 Text(cfg.model, fontSize = 11.sp, color = Color(0xFF6E7681))
             }
-            TextButton(onClick = {
+            IconButton(onClick = {
                 ttsOn = !ttsOn
                 if (!ttsOn) tts.stop()
             }) {
-                Text(if (ttsOn) "🔊 开" else "🔈 关", fontSize = 13.sp)
+                Icon(
+                    imageVector = if (ttsOn) Icons.Rounded.VolumeUp else Icons.Rounded.VolumeOff,
+                    contentDescription = "朗读",
+                    tint = if (ttsOn) Color(0xFF4D8DFF) else Color(0xFF6E7681)
+                )
             }
             TextButton(onClick = onSettings) { Text("设置", fontSize = 13.sp) }
         }
@@ -602,7 +616,7 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
                     .padding(horizontal = 12.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("📎 " + an, color = Color(0xFF8A93A0), fontSize = 13.sp,
+                Text("附件 · " + an, color = Color(0xFF8A93A0), fontSize = 13.sp,
                     modifier = Modifier.weight(1f))
                 TextButton(onClick = { attachName = null; attachText = "" }) { Text("移除") }
             }
@@ -631,33 +645,51 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
             }
         }
 
+        if (showActions) {
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF15181E))
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ActionTile(Icons.Rounded.PhotoLibrary, "图片", enabled = !busy) {
+                    showActions = false
+                    picker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                }
+                ActionTile(Icons.Rounded.AttachFile, "文件", enabled = !busy) {
+                    showActions = false
+                    filePicker.launch(arrayOf("*/*"))
+                }
+                ActionTile(Icons.Rounded.Brush, "画图", enabled = !busy) {
+                    showActions = false
+                    draw()
+                }
+                MicButton(onText = { input = it })
+            }
+        }
+
         Row(
             Modifier
                 .fillMaxWidth()
                 .background(Color(0xFF181B21))
-                .padding(8.dp),
+                .padding(horizontal = 4.dp, vertical = 6.dp),
             verticalAlignment = Alignment.Bottom
         ) {
-            TextButton(
-                onClick = { draw() },
+            IconButton(
+                onClick = { showActions = !showActions },
                 enabled = !busy,
-                modifier = Modifier.height(52.dp)
-            ) { Text("🎨", fontSize = 20.sp) }
-            TextButton(
-                onClick = { filePicker.launch(arrayOf("*/*")) },
-                enabled = !busy,
-                modifier = Modifier.height(52.dp)
-            ) { Text("📎", fontSize = 20.sp) }
-            MicButton(onText = { input = it })
-            TextButton(
-                onClick = {
-                    picker.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                    )
-                },
-                modifier = Modifier.height(52.dp)
-            ) { Text("📷", fontSize = 20.sp) }
-
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    imageVector = if (showActions) Icons.Rounded.Close else Icons.Rounded.Add,
+                    contentDescription = "更多",
+                    tint = if (showActions) Color(0xFF4D8DFF) else Color(0xFFB8C0CC)
+                )
+            }
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
@@ -668,12 +700,18 @@ fun ChatScreen(cfg: Cfg, onSettings: () -> Unit) {
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(onSend = { send() })
             )
-            Spacer(Modifier.width(8.dp))
-            Button(
+            IconButton(
                 onClick = { send() },
-                enabled = !busy && (input.isNotBlank() || pending != null),
-                modifier = Modifier.height(52.dp)
-            ) { Text(if (busy) "…" else "发送") }
+                enabled = !busy && (input.isNotBlank() || pending != null || attachText.isNotBlank()),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Send,
+                    contentDescription = "发送",
+                    tint = if (!busy && (input.isNotBlank() || pending != null || attachText.isNotBlank()))
+                        Color(0xFF4D8DFF) else Color(0xFF3F4A57)
+                )
+            }
         }
     }
 }
@@ -719,7 +757,7 @@ fun Bubble(m: Msg) {
             }
             val fn = m.fileName
             if (fn != null) {
-                Text("📎 " + fn, fontSize = 12.sp, color = Color(0xCCFFFFFF))
+                Text("附件 · " + fn, fontSize = 12.sp, color = Color(0xCCFFFFFF))
             }
             if (m.text.isNotEmpty() || bmp == null) {
                 Text(

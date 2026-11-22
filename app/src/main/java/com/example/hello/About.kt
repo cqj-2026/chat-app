@@ -16,8 +16,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 
-private const val RELEASE_URL =
-    "https://github.com/cqj-2026/chat-app/releases/latest/download/app-release.apk"
+private const val REPO_URL = "https://github.com/cqj-2026/chat-app"
+private const val RELEASES_URL = "https://github.com/cqj-2026/chat-app/releases"
 
 /**
  * 开发者信息页：淡入后停留，点击任意位置才进入下一步。
@@ -46,7 +46,7 @@ fun AboutScreen(onDone: () -> Unit) {
             Modifier
                 .fillMaxSize()
                 .safeDrawingPadding()
-                .padding(horizontal = 28.dp, vertical = 24.dp),
+                .padding(horizontal = 24.dp, vertical = 22.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.weight(1f))
@@ -56,7 +56,7 @@ fun AboutScreen(onDone: () -> Unit) {
                     .fillMaxWidth()
                     .alpha(alpha.coerceIn(0f, 1f)),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text(
                     "本应用由 蔡启俊 独立开发",
@@ -65,26 +65,45 @@ fun AboutScreen(onDone: () -> Unit) {
                     textAlign = TextAlign.Center
                 )
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(10.dp))
 
                 Text(
-                    "下载链接",
+                    "GITHUB",
                     color = Color(0xFF5B6472),
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace
                 )
                 Text(
                     "github.com/cqj-2026/chat-app",
                     color = Color(0xFF4D8DFF),
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontFamily = FontFamily.Monospace,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.clickable {
-                        runCatching { uriHandler.openUri(RELEASE_URL) }
+                        runCatching { uriHandler.openUri(REPO_URL) }
                     }
                 )
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    "下载最新版",
+                    color = Color(0xFF5B6472),
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    "github.com/cqj-2026/chat-app/releases",
+                    color = Color(0xFF4D8DFF),
+                    fontSize = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.clickable {
+                        runCatching { uriHandler.openUri(RELEASES_URL) }
+                    }
+                )
+
+                Spacer(Modifier.height(10.dp))
 
                 Text(
                     "技术支持：DeepSeek",
@@ -103,7 +122,7 @@ fun AboutScreen(onDone: () -> Unit) {
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth()
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(4.dp))
         }
     }
 }
